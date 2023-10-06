@@ -1,0 +1,21 @@
+version: '2.4'
+services:
+
+  marmiton:
+    image: marmiton:aparant
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16.0
+    user: postgres:postgres
+    environment:
+      - "POSTGRES_PASSWORD=pass123"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
