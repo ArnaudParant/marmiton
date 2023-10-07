@@ -22,7 +22,10 @@ func hello(c *gin.Context) {
 
 
 func (env Env) getRecipes(c *gin.Context) {
-    rows, err := env.DB.Query("SELECT * FROM recipes;")
+	tx := db.BeginWithFunctions(env.DB)
+	defer tx.Commit()
+
+    rows, err := tx.Query(db.MakeRecipeQuery(""))
 	defer rows.Close()
 
     switch err {
@@ -53,7 +56,11 @@ func (env Env) getRecipes(c *gin.Context) {
 
 func (env Env) getRecipeByID(c *gin.Context) {
 	id := c.Param("id")
-	row := env.DB.QueryRow("SELECT * FROM recipes WHERE id=$1;", id)
+
+	tx := db.BeginWithFunctions(env.DB)
+	defer tx.Commit()
+
+	row := tx.QueryRow(db.MakeRecipeQuery("recipes.id = $1"), id)
 	err, recipe := db.ScanRecipe(row)
 
     switch err {
@@ -72,27 +79,48 @@ func (env Env) getRecipeByID(c *gin.Context) {
 
 
 func (env Env) getRecipeByIngredients(c *gin.Context) {
-	ingredients := c.QueryArray("ingredients")
+	ingredients := c.QueryArray("ingredient")
 
 	if ingredients == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "You MUST give at least one ingredient"})
 		return
 	}
 
-	q := "SELECT * FROM recipes WHERE ingredients *~ '$1';"
-	regex := strings.Join(ingredients, "|")
+	tx := db.BeginWithFunctions(env.DB)
+	defer tx.Commit()
 
-	row := env.DB.QueryRow(q, regex)
-	err, recipe := db.ScanRecipe(row)
+	var where_query []string
+	var values []any
+	for idx, ingredient := range(ingredients) {
+		where_query = append(where_query, fmt.Sprintf("ingredient ILIKE $%d", idx+1))
+		values = append(values, "%" + ingredient + "%")
+	}
+
+	query := fmt.Sprintf("recipes.id IN (SELECT recipe_id FROM ingredients WHERE %s)", strings.Join(where_query, " OR "))
+
+
+	rows, err := env.DB.Query(db.MakeRecipeQuery(query), values...)
+	defer rows.Close()
 
     switch err {
 
     case nil:
-        c.JSON(http.StatusOK, gin.H{"recipe": recipe})
+        recipes := make([]db.Recipe, 0)
+
+        for rows.Next() {
+			err, recipe := db.ScanRecipe(rows)
+
+            if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"message": "Unable to fetch results"})
+                return
+            }
+            recipes = append(recipes, recipe)
+        }
+
+        c.JSON(http.StatusOK, gin.H{"recipes": recipes})
 
     case sql.ErrNoRows:
-		e := fmt.Sprintf("Not found receipe for ingredients")
-		c.JSON(http.StatusNotFound, gin.H{"message": e})
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "Not any recipes found"})
 
     default:
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "Unknown error"})
