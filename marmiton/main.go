@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"strings"
     "net/http"
 	"database/sql"
@@ -16,41 +17,26 @@ type Env struct {
 }
 
 
-func hello(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"message": "Hey! Let's cook"})
+type filter func([]string, int) (string, []any)
+
+
+var parametersToFilterFunction map[string] filter = map[string] filter{
+  "ingredient": filterByIngredient,
+  "tag": filterByTag,
+  "id": filterById,
+  "name": filterByName,
+  "author": filterByAuthor,
+  "budget": filterByBudget,
+  "setup_time": filterBySetupTime,
+  "cook_time": filterByCookTime,
+  "total_time": filterByTotalTime,
+  "difficulty": filterByDifficulty,
+  "people_quantity": filterByPeopleQuantity,
 }
 
 
-func (env Env) getRecipes(c *gin.Context) {
-	tx := db.BeginWithFunctions(env.DB)
-	defer tx.Commit()
-
-    rows, err := tx.Query(db.MakeRecipeQuery(""))
-	defer rows.Close()
-
-    switch err {
-
-    case nil:
-        recipes := make([]db.Recipe, 0)
-
-        for rows.Next() {
-			err, recipe := db.ScanRecipe(rows)
-
-            if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"message": "Unable to fetch results"})
-                return
-            }
-            recipes = append(recipes, recipe)
-        }
-
-        c.JSON(http.StatusOK, gin.H{"recipes": recipes})
-
-    case sql.ErrNoRows:
-		c.JSON(http.StatusInternalServerError, gin.H{"message": "Not any recipes found"})
-
-    default:
-		c.JSON(http.StatusInternalServerError, gin.H{"message": "Unknown error"})
-    }
+func hello(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"message": "Hey! Let's cook"})
 }
 
 
@@ -73,33 +59,33 @@ func (env Env) getRecipeByID(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"message": e})
 
     default:
-		c.JSON(http.StatusInternalServerError, gin.H{"message": "Unknown error"})
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
     }
 }
 
 
-func (env Env) getRecipeByIngredients(c *gin.Context) {
-	ingredients := c.QueryArray("ingredient")
-
-	if ingredients == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "You MUST give at least one ingredient"})
-		return
-	}
+func (env Env) getRecipes(c *gin.Context) {
+	queries := make([]string, 0)
+	values := make([]any, 0)
 
 	tx := db.BeginWithFunctions(env.DB)
 	defer tx.Commit()
 
-	var where_query []string
-	var values []any
-	for idx, ingredient := range(ingredients) {
-		where_query = append(where_query, fmt.Sprintf("ingredient ILIKE $%d", idx+1))
-		values = append(values, "%" + ingredient + "%")
+	for parameter, filter := range(parametersToFilterFunction) {
+		inputs := c.QueryArray(parameter)
+
+		if inputs != nil {
+			offset := len(values)
+			q, v := filter(inputs, offset)
+			queries = append(queries, q)
+			values = append(values, v...)
+		}
 	}
 
-	query := fmt.Sprintf("recipes.id IN (SELECT recipe_id FROM ingredients WHERE %s)", strings.Join(where_query, " OR "))
 
-
-	rows, err := env.DB.Query(db.MakeRecipeQuery(query), values...)
+	query := db.MakeRecipeQuery(strings.Join(queries, " AND "))
+	log.Printf(query)
+	rows, err := tx.Query(query, values...)
 	defer rows.Close()
 
     switch err {
@@ -123,8 +109,73 @@ func (env Env) getRecipeByIngredients(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "Not any recipes found"})
 
     default:
-		c.JSON(http.StatusInternalServerError, gin.H{"message": "Unknown error"})
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
     }
+}
+
+
+func filterBy(field string, comparator string, valueWrapper string, valueCombination string, filters []string, offset int) (string, []any) {
+	queries := make([]string, 0)
+	values := make([]any, 0)
+
+	for idx, filter := range(filters) {
+		queries = append(queries, fmt.Sprintf("%s %s $%d", field, comparator, idx + offset + 1))
+		values = append(values, valueWrapper + filter + valueWrapper)
+	}
+
+	query := "(" + strings.Join(queries, valueCombination) + ")"
+	return query, values
+}
+
+
+func filterByIngredient(ingredients []string, offset int) (string, []any) {
+	query, values := filterBy("ingredient", "ILIKE", "%", " OR ", ingredients, offset)
+	query = fmt.Sprintf("recipes.id IN (SELECT recipe_id FROM ingredients WHERE %s)", query)
+
+	return query, values
+}
+
+func filterByTag(tags []string, offset int) (string, []any) {
+	query, values := filterBy("tag", "ILIKE", "%",  " OR ",tags, offset)
+	query = fmt.Sprintf("recipes.id IN (SELECT recipe_id FROM tags WHERE %s)", query)
+
+	return query, values
+}
+
+func filterById(ids []string, offset int) (string, []any) {
+	return filterBy("recipes.id", "=", "",  " OR ", ids, offset)
+}
+
+func filterByName(names []string, offset int) (string, []any) {
+	return filterBy("name", "ILIKE", "%",  " OR ", names, offset)
+}
+
+func filterByAuthor(authors []string, offset int) (string, []any) {
+	return filterBy("author", "ILIKE", "%",  " OR ", authors, offset)
+}
+
+func filterByBudget(budgets []string, offset int) (string, []any) {
+	return filterBy("budget", "ILIKE", "%",  " OR ", budgets, offset)
+}
+
+func filterBySetupTime(setupTimes []string, offset int) (string, []any) {
+	return filterBy("setup_time", "ILIKE", "%",  " OR ", setupTimes, offset)
+}
+
+func filterByCookTime(cookTimes []string, offset int) (string, []any) {
+	return filterBy("cook_time", "ILIKE", "%",  " OR ", cookTimes, offset)
+}
+
+func filterByTotalTime(totalTimes []string, offset int) (string, []any) {
+	return filterBy("total_time", "ILIKE", "%",  " OR ", totalTimes, offset)
+}
+
+func filterByDifficulty(difficulties []string, offset int) (string, []any) {
+	return filterBy("difficulty", "ILIKE", "%",  " OR ", difficulties, offset)
+}
+
+func filterByPeopleQuantity(peopleQuantities []string, offset int) (string, []any) {
+	return filterBy("people_quantity", "ILIKE", "%",  " OR ", peopleQuantities, offset)
 }
 
 
@@ -135,7 +186,6 @@ func main() {
     router := gin.Default()
     router.GET("/", hello)
     router.GET("/recipes", env.getRecipes)
-    router.GET("/recipes/ingredients", env.getRecipeByIngredients)
     router.GET("/recipes/:id", env.getRecipeByID)
 
     router.Run()

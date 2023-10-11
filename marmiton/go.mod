@@ -2,7 +2,11 @@ module ArnaudParant/marmiton
 
 go 1.21.1
 
-require github.com/gin-gonic/gin v1.9.1
+require (
+	ArnaudParant/marmiton/db v0.0.0-00010101000000-000000000000
+	github.com/gin-gonic/gin v1.9.1
+	github.com/lib/pq v1.10.9
+)
 
 require (
 	github.com/bytedance/sonic v1.9.1 // indirect
