@@ -64,7 +64,10 @@ func BeginWithFunctions(db *sql.DB) (*sql.Tx) {
          SFUNC    = public.first_agg,
          STYPE    = anyelement,
          PARALLEL = safe
-       );`)
+       );
+
+       CREATE EXTENSION IF NOT EXISTS fuzzystrmatch;
+       `)
 
 	if err != nil {
 		panic(err)

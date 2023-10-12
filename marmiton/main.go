@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"strings"
     "net/http"
 	"database/sql"
@@ -84,7 +83,7 @@ func (env Env) getRecipes(c *gin.Context) {
 
 
 	query := db.MakeRecipeQuery(strings.Join(queries, " AND "))
-	log.Printf(query)
+	println(query)
 	rows, err := tx.Query(query, values...)
 	defer rows.Close()
 
@@ -109,73 +108,79 @@ func (env Env) getRecipes(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "Not any recipes found"})
 
     default:
-		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "query": query})
     }
 }
 
 
-func filterBy(field string, comparator string, valueWrapper string, valueCombination string, filters []string, offset int) (string, []any) {
+func filterBy(field string, comparator string, filters []string, offset int) (string, []any) {
 	queries := make([]string, 0)
 	values := make([]any, 0)
 
 	for idx, filter := range(filters) {
-		queries = append(queries, fmt.Sprintf("%s %s $%d", field, comparator, idx + offset + 1))
-		values = append(values, valueWrapper + filter + valueWrapper)
+
+		q := fmt.Sprintf("%s %s $%d", field, comparator, idx + offset + 1)
+		if comparator == "LEVENSHTEIN" {
+			q = fmt.Sprintf("%s(%s, $%d) <= 2", comparator, field, idx + offset + 1)
+		}
+
+		queries = append(queries, q)
+		values = append(values, filter)
 	}
 
-	query := "(" + strings.Join(queries, valueCombination) + ")"
+	query := "(" + strings.Join(queries, " OR ") + ")"
 	return query, values
 }
 
 
 func filterByIngredient(ingredients []string, offset int) (string, []any) {
-	query, values := filterBy("ingredient", "ILIKE", "%", " OR ", ingredients, offset)
+	query, values := filterBy("ingredient", "LEVENSHTEIN", ingredients, offset)
 	query = fmt.Sprintf("recipes.id IN (SELECT recipe_id FROM ingredients WHERE %s)", query)
 
 	return query, values
 }
 
 func filterByTag(tags []string, offset int) (string, []any) {
-	query, values := filterBy("tag", "ILIKE", "%",  " OR ",tags, offset)
+	query, values := filterBy("tag", "LEVENSHTEIN", tags, offset)
 	query = fmt.Sprintf("recipes.id IN (SELECT recipe_id FROM tags WHERE %s)", query)
 
 	return query, values
 }
 
 func filterById(ids []string, offset int) (string, []any) {
-	return filterBy("recipes.id", "=", "",  " OR ", ids, offset)
+	return filterBy("recipes.id", "=", ids, offset)
 }
 
 func filterByName(names []string, offset int) (string, []any) {
-	return filterBy("name", "ILIKE", "%",  " OR ", names, offset)
+	return filterBy("name", "LEVENSHTEIN", names, offset)
 }
 
 func filterByAuthor(authors []string, offset int) (string, []any) {
-	return filterBy("author", "ILIKE", "%",  " OR ", authors, offset)
+	return filterBy("author", "LEVENSHTEIN", authors, offset)
 }
 
 func filterByBudget(budgets []string, offset int) (string, []any) {
-	return filterBy("budget", "ILIKE", "%",  " OR ", budgets, offset)
+	return filterBy("budget", "LEVENSHTEIN", budgets, offset)
 }
 
 func filterBySetupTime(setupTimes []string, offset int) (string, []any) {
-	return filterBy("setup_time", "ILIKE", "%",  " OR ", setupTimes, offset)
+	return filterBy("setup_time", "LEVENSHTEIN", setupTimes, offset)
 }
 
 func filterByCookTime(cookTimes []string, offset int) (string, []any) {
-	return filterBy("cook_time", "ILIKE", "%",  " OR ", cookTimes, offset)
+	return filterBy("cook_time", "LEVENSHTEIN", cookTimes, offset)
 }
 
 func filterByTotalTime(totalTimes []string, offset int) (string, []any) {
-	return filterBy("total_time", "ILIKE", "%",  " OR ", totalTimes, offset)
+	return filterBy("total_time", "LEVENSHTEIN", totalTimes, offset)
 }
 
 func filterByDifficulty(difficulties []string, offset int) (string, []any) {
-	return filterBy("difficulty", "ILIKE", "%",  " OR ", difficulties, offset)
+	return filterBy("difficulty", "LEVENSHTEIN", difficulties, offset)
 }
 
 func filterByPeopleQuantity(peopleQuantities []string, offset int) (string, []any) {
-	return filterBy("people_quantity", "ILIKE", "%",  " OR ", peopleQuantities, offset)
+	return filterBy("people_quantity", "LEVENSHTEIN", peopleQuantities, offset)
 }
 
 
